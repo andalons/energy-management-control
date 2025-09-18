@@ -57,6 +57,12 @@ dist/
 # Outputs from automation scripts
 scripts/automation/created_issues.txt
 
+# Microsoft Fabric exports
+*.pbix       # Power BI reports
+*.delta      # Fabric lakehouse tables
+*.deltalog   # Fabric transaction logs
+
+
 # Data files (parquet/csv local, never in repo)
 data/
 *.parquet
