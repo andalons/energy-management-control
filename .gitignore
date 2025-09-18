@@ -1,2 +1,71 @@
-# Archivos de automatización locales
+# =============================
+# OS-SPECIFIC FILES
+# =============================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# =============================
+# PYTHON
+# =============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Logs
+*.log
+
+# =============================
+# JUPYTER / NOTEBOOKS
+# =============================
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+
+# =============================
+# EDITORS / IDE
+# =============================
+.vscode/
+.idea/
+
+# =============================
+# PROJECT-SPECIFIC
+# =============================
+# Outputs from automation scripts
 scripts/automation/created_issues.txt
+
+# Microsoft Fabric exports
+*.pbix       # Power BI reports
+*.delta      # Fabric lakehouse tables
+*.deltalog   # Fabric transaction logs
+
+
+# Data files (parquet/csv local, never in repo)
+data/
+*.parquet
+*.csv
+*.tsv
+*.xlsx
