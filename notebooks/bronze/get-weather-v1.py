@@ -159,8 +159,12 @@ for year in years:
 
     for comunidad, g in y_df.groupby("comunidad"):
         g = g.drop(columns=["comunidad", "año"])
-        fname = f"brz_{slugify(comunidad)}_{year}.csv"
+        fname = f"brz_{slugify(comunidad)}_{year}.json"
         path = os.path.join(year_dir, fname)
-        g.to_csv(path, sep=";", index=False, encoding="utf-8-sig")
 
-print("¡Archivos guardados en su carpeta correspondiente por CCAA y año!")
+        # exportamos a JSON (lista de registros)
+        g.to_json(path, orient="records", force_ascii=False, indent=2)
+
+        print("Guardado:", path)
+
+print("¡Archivos JSON guardados en carpetas por CCAA y año!")
