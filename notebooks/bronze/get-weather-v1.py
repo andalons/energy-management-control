@@ -1,7 +1,14 @@
-import requests, pandas as pd, os, re, unicodedata
+import requests, pandas as pd, os, re, unicodedata, time
 from datetime import date
 
-# === 1) Coordenadas representativas por CCAA ===
+# ===== 1) Config =====
+# Grupos de CCAA por petición para evitar 429
+GROUP_SIZE = 6
+# Retries ante 429/5xx
+MAX_RETRIES = 6
+INITIAL_BACKOFF = 1.5  # segundos
+
+# ===== 2) Coordenadas por CCAA =====
 ccaa_coords = {
     "Andalucía": (37.3891, -5.9845),
     "Aragón": (41.6488, -0.8891),
@@ -24,53 +31,106 @@ ccaa_coords = {
     "Melilla": (35.2923, -2.9381),
 }
 
-# === 2) Rango: 2023-01-01 a 2024-12-31 ===
-start = date(2023, 1, 1)
-end   = date(2024, 12, 31)
+# ===== 3) Rango: 2023-01-01 hasta hoy =====
+start_global = date(2023, 1, 1)
+end_global = date.today()
+# ===== 4) Utilidades =====
+def slugify(text: str) -> str:
+    return re.sub(
+        r"[^A-Za-z0-9_-]+", "_",
+        unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    ).strip("_").lower()
 
-# === 3) Petición a Open-Meteo ===
-lats = ",".join(str(v[0]) for v in ccaa_coords.values())
-lons = ",".join(str(v[1]) for v in ccaa_coords.values())
+def chunks(lst, n):
+    """Particiona 'lst' en trozos de tamaño n."""
+    for i in range(0, len(lst), n):
+        yield lst[i:i+n]
 
-params = {
-    "latitude": lats,
-    "longitude": lons,
-    "start_date": start.isoformat(),
-    "end_date": end.isoformat(),
-    "daily": "temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,wind_speed_10m_max",
-    "timezone": "Europe/Madrid",
-}
-url = "https://archive-api.open-meteo.com/v1/archive"
-r = requests.get(url, params=params, timeout=180)
-r.raise_for_status()
-data = r.json()
-locations = data if isinstance(data, list) else data.get("locations", [data])
+def fetch_open_meteo(coords_items, start_date, end_date):
+    """Llama al endpoint para un grupo de coords con reintentos/backoff; devuelve lista de 'locations'."""
+    lats = ",".join(str(v[0]) for _, v in coords_items)
+    lons = ",".join(str(v[1]) for _, v in coords_items)
 
-# === 4) Parseo diario ===
+    params = {
+        "latitude": lats,
+        "longitude": lons,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "daily": "temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,wind_speed_10m_max",
+        "timezone": "Europe/Madrid",
+    }
+    url = "https://archive-api.open-meteo.com/v1/archive"
+
+    backoff = INITIAL_BACKOFF
+    for attempt in range(1, MAX_RETRIES + 1):
+        resp = requests.get(url, params=params, timeout=180)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data if isinstance(data, list) else data.get("locations", [data])
+
+        # Si 429 u otro error recuperable, esperar (respeta Retry-After si viene)
+        if resp.status_code in (429, 500, 502, 503, 504):
+            retry_after = resp.headers.get("Retry-After")
+            wait = float(retry_after) if retry_after and retry_after.isdigit() else backoff
+            time.sleep(wait)
+            backoff *= 2
+            continue
+
+        # Otros errores: levantar excepción con detalle
+        resp.raise_for_status()
+
+    raise RuntimeError(f"Fallo tras {MAX_RETRIES} intentos (último status {resp.status_code})")
+
+# ===== 5) Descarga por años y grupos para evitar 429 =====
 rows = []
-for name, loc in zip(ccaa_coords.keys(), locations):
-    daily = loc.get("daily", {})
-    times = daily.get("time", [])
-    for i, t in enumerate(times):
-        rows.append({
-            "comunidad": name,
-            "fecha": t[:10],
-            "tmax": daily.get("temperature_2m_max", [None]*len(times))[i],
-            "tmin": daily.get("temperature_2m_min", [None]*len(times))[i],
-            "tmed": daily.get("temperature_2m_mean", [None]*len(times))[i],
-            "prec": daily.get("precipitation_sum", [None]*len(times))[i],
-            "viento_max": daily.get("wind_speed_10m_max", [None]*len(times))[i],
-        })
+ccaa_list = list(ccaa_coords.items())
 
+years = [2023, 2024, 2025]
+for year in years:
+    y_start = date(year, 1, 1)
+    y_end = date(year, 12, 31)
+    # recortar al rango global
+    if y_end < start_global or y_start > end_global:
+        continue
+    y_start = max(y_start, start_global)
+    y_end   = min(y_end, end_global)
+
+    print(f"Descargando {year} ({y_start} a {y_end})...")
+    for group in chunks(ccaa_list, GROUP_SIZE):
+        # llamada con reintentos
+        locations = fetch_open_meteo(group, y_start, y_end)
+        # parsear
+        for (name, _), loc in zip([*group], locations):
+            daily = loc.get("daily", {})
+            times = daily.get("time", [])
+            tmax = daily.get("temperature_2m_max", [])
+            tmin = daily.get("temperature_2m_min", [])
+            tmed = daily.get("temperature_2m_mean", [])
+            prec = daily.get("precipitation_sum", [])
+            vmax = daily.get("wind_speed_10m_max", [])
+            for i, t in enumerate(times):
+                rows.append({
+                    "comunidad": name,
+                    "fecha": t[:10],
+                    "tmax": tmax[i] if i < len(tmax) else None,
+                    "tmin": tmin[i] if i < len(tmin) else None,
+                    "tmed": tmed[i] if i < len(tmed) else None,
+                    "prec": prec[i] if i < len(prec) else None,
+                    "viento_max": vmax[i] if i < len(vmax) else None,
+                })
+
+# ===== 6) DataFrame, agregado mensual y redondeo =====
 df = pd.DataFrame(rows)
-df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
-df = df[(df["fecha"] >= pd.Timestamp(start)) & (df["fecha"] <= pd.Timestamp(end))]
+if df.empty:
+    raise SystemExit("No se recibieron datos.")
 
-# === 5) Agregado mensual ===
+df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+df = df[(df["fecha"] >= pd.Timestamp(start_global)) & (df["fecha"] <= pd.Timestamp(end_global))]
+
 df_mensual = (
     df.assign(
-        mes=df["fecha"].dt.month,
-        año=df["fecha"].dt.year
+        año=df["fecha"].dt.year,
+        mes=df["fecha"].dt.month  # 1..12
     )
     .groupby(["comunidad", "año", "mes"], as_index=False)
     .agg(
@@ -83,21 +143,24 @@ df_mensual = (
     .sort_values(["comunidad", "año", "mes"])
 )
 
-# --- redondear a enteros ---
 num_cols = ["tmax", "tmin", "tmed", "prec", "viento_max"]
 df_mensual[num_cols] = df_mensual[num_cols].round(0).astype("Int64")
 
-# === 6) Guardar un archivo por comunidad ===
-def slugify(text):
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^A-Za-z0-9_-]+", "_", text).strip("_").lower()
+# ===== 7) Se crea carpeta =====
+base_dir = f"brz_ccaa_mensual_2023_2025"
+os.makedirs(base_dir, exist_ok=True)
 
-out_dir = f"brz_ccaa_mensual_2023-2024"
-os.makedirs(out_dir, exist_ok=True)
+for year in years:
+    y_df = df_mensual[df_mensual["año"] == year]
+    if y_df.empty:
+        continue
+    year_dir = os.path.join(base_dir, str(year))
+    os.makedirs(year_dir, exist_ok=True)
 
-for comunidad, g in df_mensual.groupby("comunidad"):
-    g = g.drop(columns=["comunidad"])
-    fname = f"brz_{slugify(comunidad)}_mensual_2023_2024.csv"
-    path = os.path.join(out_dir, fname)
-    g.to_csv(path, sep=";", index=False, encoding="utf-8-sig")
-    print("Guardado:", path)
+    for comunidad, g in y_df.groupby("comunidad"):
+        g = g.drop(columns=["comunidad", "año"])
+        fname = f"brz_{slugify(comunidad)}_{year}.csv"
+        path = os.path.join(year_dir, fname)
+        g.to_csv(path, sep=";", index=False, encoding="utf-8-sig")
+
+print("¡Archivos guardados en su carpeta correspondiente por CCAA y año!")
