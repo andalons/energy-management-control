@@ -84,3 +84,13 @@ if not exists:
         medallion_short=medallion_short
     )
 ```
+
+## 🚀 Use in Fabric
+- Upload json_log.py to your Fabric workspace.(e.g., `/Files/code`)
+- Import the module in your notebook or job:
+```python
+import sys
+sys.path.append("/lakehouse/default/Files/code")
+from json_log import save_json_log, check_json_log_exists
+```
+- Use the functions in your notebooks or jobs as shown in the usage example.
