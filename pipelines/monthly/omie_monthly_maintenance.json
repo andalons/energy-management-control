@@ -1,0 +1,395 @@
+{
+  "name": "omie_monthly_maintenance",
+  "description": "Monthly OMIE data maintenance, optimization and quality validation pipeline",
+  "type": "Pipeline",
+  "properties": {
+    "activities": [
+      {
+        "name": "InitializeMaintenanceSession",
+        "type": "SetVariable",
+        "dependsOn": [],
+        "typeProperties": {
+          "variableName": "maintenanceSessionId",
+          "value": "@concat('monthly_', formatDateTime(pipeline().TriggerTime, 'yyyyMMdd_HHmmss'))"
+        }
+      },
+      {
+        "name": "AnalyzeDeltaTableHealth",
+        "type": "SparkJob",
+        "dependsOn": [
+          {
+            "activity": "InitializeMaintenanceSession",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0:30:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 60
+        },
+        "typeProperties": {
+          "sparkJobDefinition": {
+            "referenceName": "OmieMaintenanceSparkJob",
+            "type": "SparkJobDefinitionReference"
+          },
+          "mainDefinitionFile": "scripts/automation/omie_monthly_pipeline.py",
+          "args": [
+            "--operation",
+            "health_analysis",
+            "--session-id",
+            "@variables('maintenanceSessionId')",
+            "--config-path",
+            "@pipeline().parameters.configPath"
+          ],
+          "conf": {
+            "spark.sql.adaptive.enabled": "true",
+            "spark.sql.adaptive.coalescePartitions.enabled": "true",
+            "spark.databricks.delta.optimizeWrite.enabled": "true",
+            "spark.databricks.delta.autoCompact.enabled": "true"
+          },
+          "driverCores": 4,
+          "driverMemory": "8g",
+          "executorCores": 4,
+          "executorMemory": "8g",
+          "numExecutors": 3
+        }
+      },
+      {
+        "name": "PerformDataQualityValidation",
+        "type": "SparkJob",
+        "dependsOn": [
+          {
+            "activity": "AnalyzeDeltaTableHealth",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "1:00:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 120
+        },
+        "typeProperties": {
+          "sparkJobDefinition": {
+            "referenceName": "OmieMaintenanceSparkJob",
+            "type": "SparkJobDefinitionReference"
+          },
+          "mainDefinitionFile": "scripts/automation/omie_monthly_pipeline.py",
+          "args": [
+            "--operation",
+            "quality_validation",
+            "--session-id",
+            "@variables('maintenanceSessionId')",
+            "--lookback-days",
+            "@pipeline().parameters.validationLookbackDays",
+            "--config-path",
+            "@pipeline().parameters.configPath"
+          ],
+          "conf": {
+            "spark.sql.adaptive.enabled": "true",
+            "spark.sql.adaptive.coalescePartitions.enabled": "true",
+            "spark.sql.adaptive.skewJoin.enabled": "true"
+          },
+          "driverCores": 4,
+          "driverMemory": "8g",
+          "executorCores": 4,
+          "executorMemory": "8g",
+          "numExecutors": 4
+        }
+      },
+      {
+        "name": "OptimizeDeltaTables",
+        "type": "SparkJob",
+        "dependsOn": [
+          {
+            "activity": "PerformDataQualityValidation",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "2:00:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 300
+        },
+        "typeProperties": {
+          "sparkJobDefinition": {
+            "referenceName": "OmieMaintenanceSparkJob",
+            "type": "SparkJobDefinitionReference"
+          },
+          "mainDefinitionFile": "scripts/automation/omie_monthly_pipeline.py",
+          "args": [
+            "--operation",
+            "optimize_tables",
+            "--session-id",
+            "@variables('maintenanceSessionId')",
+            "--enable-vacuum",
+            "@pipeline().parameters.enableVacuum",
+            "--vacuum-retention-hours",
+            "@pipeline().parameters.vacuumRetentionHours",
+            "--config-path",
+            "@pipeline().parameters.configPath"
+          ],
+          "conf": {
+            "spark.sql.adaptive.enabled": "true",
+            "spark.sql.adaptive.coalescePartitions.enabled": "true",
+            "spark.databricks.delta.optimizeWrite.enabled": "true",
+            "spark.databricks.delta.autoCompact.enabled": "true"
+          },
+          "driverCores": 6,
+          "driverMemory": "12g",
+          "executorCores": 4,
+          "executorMemory": "8g",
+          "numExecutors": 6
+        }
+      },
+      {
+        "name": "CleanupStagingData",
+        "type": "SparkJob",
+        "dependsOn": [
+          {
+            "activity": "OptimizeDeltaTables",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0:30:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 60
+        },
+        "typeProperties": {
+          "sparkJobDefinition": {
+            "referenceName": "OmieMaintenanceSparkJob",
+            "type": "SparkJobDefinitionReference"
+          },
+          "mainDefinitionFile": "scripts/automation/omie_monthly_pipeline.py",
+          "args": [
+            "--operation",
+            "cleanup_staging",
+            "--session-id",
+            "@variables('maintenanceSessionId')",
+            "--cleanup-age-days",
+            "@pipeline().parameters.cleanupAgeDays",
+            "--config-path",
+            "@pipeline().parameters.configPath"
+          ],
+          "conf": {
+            "spark.sql.adaptive.enabled": "true"
+          },
+          "driverCores": 2,
+          "driverMemory": "4g",
+          "executorCores": 2,
+          "executorMemory": "4g",
+          "numExecutors": 2
+        }
+      },
+      {
+        "name": "GenerateMonthlyReport",
+        "type": "SparkJob",
+        "dependsOn": [
+          {
+            "activity": "CleanupStagingData",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0:20:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 60
+        },
+        "typeProperties": {
+          "sparkJobDefinition": {
+            "referenceName": "OmieMaintenanceSparkJob",
+            "type": "SparkJobDefinitionReference"
+          },
+          "mainDefinitionFile": "scripts/automation/omie_monthly_pipeline.py",
+          "args": [
+            "--operation",
+            "generate_report",
+            "--session-id",
+            "@variables('maintenanceSessionId')",
+            "--report-month",
+            "@formatDateTime(pipeline().TriggerTime, 'yyyy-MM')",
+            "--config-path",
+            "@pipeline().parameters.configPath"
+          ],
+          "conf": {
+            "spark.sql.adaptive.enabled": "true"
+          },
+          "driverCores": 2,
+          "driverMemory": "4g",
+          "executorCores": 2,
+          "executorMemory": "4g",
+          "numExecutors": 1
+        }
+      },
+      {
+        "name": "CheckMaintenanceResults",
+        "type": "IfCondition",
+        "dependsOn": [
+          {
+            "activity": "GenerateMonthlyReport",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "expression": {
+            "value": "@greater(activity('PerformDataQualityValidation').output.result.summary.critical_issues, 0)",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "name": "SendCriticalIssueAlert",
+              "type": "WebActivity",
+              "typeProperties": {
+                "url": "@pipeline().parameters.alertWebhookUrl",
+                "method": "POST",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "pipeline": "omie_monthly_maintenance",
+                  "status": "WARNING",
+                  "alertLevel": "HIGH",
+                  "runId": "@pipeline().RunId",
+                  "sessionId": "@variables('maintenanceSessionId')",
+                  "startTime": "@pipeline().TriggerTime",
+                  "endTime": "@utcnow()",
+                  "message": "Monthly maintenance completed but critical data quality issues found",
+                  "criticalIssues": "@activity('PerformDataQualityValidation').output.result.summary.critical_issues",
+                  "warnings": "@activity('PerformDataQualityValidation').output.result.summary.warnings",
+                  "reportPath": "@activity('GenerateMonthlyReport').output.result.report_path"
+                }
+              }
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "name": "SendSuccessNotification",
+              "type": "WebActivity",
+              "typeProperties": {
+                "url": "@pipeline().parameters.notificationWebhookUrl",
+                "method": "POST",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "pipeline": "omie_monthly_maintenance",
+                  "status": "SUCCESS",
+                  "runId": "@pipeline().RunId",
+                  "sessionId": "@variables('maintenanceSessionId')",
+                  "startTime": "@pipeline().TriggerTime",
+                  "endTime": "@utcnow()",
+                  "message": "Monthly maintenance completed successfully",
+                  "overallHealth": "@activity('GenerateMonthlyReport').output.result.overall_health",
+                  "optimizationsApplied": "@activity('OptimizeDeltaTables').output.result.operations_performed",
+                  "reportPath": "@activity('GenerateMonthlyReport').output.result.report_path"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "SendMaintenanceFailureAlert",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "AnalyzeDeltaTableHealth",
+            "dependencyConditions": ["Failed"]
+          },
+          {
+            "activity": "PerformDataQualityValidation",
+            "dependencyConditions": ["Failed"]
+          },
+          {
+            "activity": "OptimizeDeltaTables",
+            "dependencyConditions": ["Failed"]
+          },
+          {
+            "activity": "CleanupStagingData",
+            "dependencyConditions": ["Failed"]
+          },
+          {
+            "activity": "GenerateMonthlyReport",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0:02:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "url": "@pipeline().parameters.alertWebhookUrl",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "pipeline": "omie_monthly_maintenance",
+            "status": "FAILED",
+            "alertLevel": "CRITICAL",
+            "runId": "@pipeline().RunId",
+            "sessionId": "@variables('maintenanceSessionId')",
+            "startTime": "@pipeline().TriggerTime",
+            "endTime": "@utcnow()",
+            "message": "Monthly maintenance pipeline failed",
+            "failedActivity": "@activity().name",
+            "error": "@string(activity().error)",
+            "requiresImmediate": true
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "configPath": {
+        "type": "string",
+        "defaultValue": "/lakehouse/default/Files/bronze/OMIE/delta_tables/metadata/pipeline_config.json"
+      },
+      "validationLookbackDays": {
+        "type": "int",
+        "defaultValue": 90
+      },
+      "enableVacuum": {
+        "type": "bool",
+        "defaultValue": true
+      },
+      "vacuumRetentionHours": {
+        "type": "int",
+        "defaultValue": 168
+      },
+      "cleanupAgeDays": {
+        "type": "int",
+        "defaultValue": 30
+      },
+      "notificationWebhookUrl": {
+        "type": "string",
+        "defaultValue": "https://your-notification-webhook.com/api/notify"
+      },
+      "alertWebhookUrl": {
+        "type": "string",
+        "defaultValue": "https://your-alert-webhook.com/api/alert"
+      }
+    },
+    "variables": {
+      "maintenanceSessionId": {
+        "type": "String"
+      },
+      "maintenanceStartTime": {
+        "type": "String"
+      },
+      "criticalIssuesFound": {
+        "type": "String"
+      }
+    },
+    "folder": {
+      "name": "OMIE"
+    },
+    "annotations": [
+      "OMIE",
+      "Monthly",
+      "Maintenance",
+      "Data Quality",
+      "Optimization"
+    ]
+  }
+}

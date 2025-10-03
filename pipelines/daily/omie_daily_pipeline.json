@@ -1,0 +1,217 @@
+{
+  "name": "omie_daily_pipeline",
+  "description": "Daily incremental OMIE data ingestion pipeline for Microsoft Fabric",
+  "type": "Pipeline",
+  "properties": {
+    "activities": [
+      {
+        "name": "CheckLakehouseAvailability",
+        "type": "Validation",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "dataset": {
+            "referenceName": "OmieLakehouseDataset",
+            "type": "DatasetReference"
+          },
+          "timeout": "0:01:00",
+          "sleep": 10,
+          "minimumSize": 0
+        }
+      },
+      {
+        "name": "ExecuteDailyPipeline",
+        "type": "SparkJob",
+        "dependsOn": [
+          {
+            "activity": "CheckLakehouseAvailability",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "1:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 120
+        },
+        "typeProperties": {
+          "sparkJobDefinition": {
+            "referenceName": "OmieDailySparkJob",
+            "type": "SparkJobDefinitionReference"
+          },
+          "mainDefinitionFile": "scripts/automation/omie_daily_pipeline.py",
+          "args": [
+            "--config-path",
+            "@pipeline().parameters.configPath",
+            "--run-id",
+            "@pipeline().RunId",
+            "--max-files",
+            "@pipeline().parameters.maxFilesPerRun"
+          ],
+          "conf": {
+            "spark.sql.adaptive.enabled": "true",
+            "spark.sql.adaptive.coalescePartitions.enabled": "true",
+            "spark.databricks.delta.optimizeWrite.enabled": "true"
+          },
+          "driverCores": 2,
+          "driverMemory": "4g",
+          "executorCores": 2,
+          "executorMemory": "4g",
+          "numExecutors": 2
+        }
+      },
+      {
+        "name": "ValidateProcessingResults",
+        "type": "SparkJob",
+        "dependsOn": [
+          {
+            "activity": "ExecuteDailyPipeline",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0:15:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "sparkJobDefinition": {
+            "referenceName": "OmieValidationSparkJob",
+            "type": "SparkJobDefinitionReference"
+          },
+          "mainDefinitionFile": "scripts/automation/validate_daily_results.py",
+          "args": [
+            "--run-id",
+            "@pipeline().RunId",
+            "--validation-mode",
+            "quick"
+          ],
+          "conf": {
+            "spark.sql.adaptive.enabled": "true"
+          },
+          "driverCores": 1,
+          "driverMemory": "2g",
+          "executorCores": 1,
+          "executorMemory": "2g",
+          "numExecutors": 1
+        }
+      },
+      {
+        "name": "SendSuccessNotification",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "ValidateProcessingResults",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0:02:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "url": "@pipeline().parameters.notificationWebhookUrl",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "pipeline": "omie_daily_pipeline",
+            "status": "SUCCESS",
+            "runId": "@pipeline().RunId",
+            "startTime": "@pipeline().TriggerTime",
+            "endTime": "@utcnow()",
+            "message": "Daily OMIE data pipeline completed successfully",
+            "filesProcessed": "@activity('ExecuteDailyPipeline').output.result.processed_files",
+            "rowsProcessed": "@activity('ExecuteDailyPipeline').output.result.total_rows"
+          }
+        }
+      },
+      {
+        "name": "SendFailureNotification",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "CheckLakehouseAvailability",
+            "dependencyConditions": ["Failed"]
+          },
+          {
+            "activity": "ExecuteDailyPipeline",
+            "dependencyConditions": ["Failed"]
+          },
+          {
+            "activity": "ValidateProcessingResults",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0:02:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "url": "@pipeline().parameters.notificationWebhookUrl",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "pipeline": "omie_daily_pipeline",
+            "status": "FAILED",
+            "runId": "@pipeline().RunId",
+            "startTime": "@pipeline().TriggerTime",
+            "endTime": "@utcnow()",
+            "message": "Daily OMIE data pipeline failed",
+            "error": "@string(activity('ExecuteDailyPipeline').error)",
+            "alertLevel": "HIGH"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "targetYears": {
+        "type": "array",
+        "defaultValue": [2023, 2024, 2025]
+      },
+      "maxFilesPerRun": {
+        "type": "int",
+        "defaultValue": 50
+      },
+      "configPath": {
+        "type": "string",
+        "defaultValue": "/lakehouse/default/Files/bronze/OMIE/delta_tables/metadata/pipeline_config.json"
+      },
+      "notificationWebhookUrl": {
+        "type": "string",
+        "defaultValue": "https://your-notification-webhook.com/api/notify"
+      },
+      "enableOptimization": {
+        "type": "bool",
+        "defaultValue": true
+      },
+      "forceReprocessDays": {
+        "type": "int",
+        "defaultValue": 7
+      }
+    },
+    "variables": {
+      "processingStartTime": {
+        "type": "String"
+      },
+      "filesProcessedCount": {
+        "type": "String"
+      },
+      "errorMessage": {
+        "type": "String"
+      }
+    },
+    "folder": {
+      "name": "OMIE"
+    },
+    "annotations": ["OMIE", "Daily", "Incremental", "Bronze Layer"]
+  }
+}
