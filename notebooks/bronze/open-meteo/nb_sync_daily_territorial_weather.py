@@ -22,7 +22,7 @@ territories_coords = {
     "Melilla": (35.2923, -2.9381),
     "Península": (40.0, -4.0),
 }
-
+import dbutils
 import os, re, unicodedata, time, random, json, requests, pandas as pd
 from datetime import date, timedelta, datetime
 from urllib3.util.retry import Retry
@@ -178,7 +178,7 @@ def discover_start_date_from_json():
 start_date = discover_start_date_from_json()
 if start_date > end_date:
     print(f"Sin trabajo: start_date={start_date} > end_date={end_date}")
-    # en Fabric con dbutils:
+    # si estás en Fabric con dbutils:
     _ = dbutils.notebook.exit("Sin trabajo") if 'dbutils' in globals() else None
 
 print(f"Rango a procesar: {start_date} .. {end_date} (RUN_MODE={RUN_MODE}, DAYS_BACK={DAYS_BACK})")
@@ -249,3 +249,31 @@ for (year, territorio), rows in bucket.items():
             f.write("[]\n")
 
 print("¡JSON actualizado en", BASE_DIR, "por año/territorio (incremental + upsert)!")
+
+from notebookutils import mssparkutils
+import json
+
+# Asegúrate de que siempre exista bucket
+if 'bucket' not in globals():
+    bucket = {}
+
+# Calcula años tocados de forma segura
+years_touched = list({year for (year, _) in bucket.keys()})
+
+# Tu objeto de resultado
+result = {
+    "start_date": start_date.isoformat(),
+    "end_date": end_date.isoformat(),
+    "years_touched": years_touched
+}
+
+# Lo stringificas tú mismo
+# result = json.dumps(result)
+
+# Para verlo en logs
+print("Returning to pipeline:")
+print(result)
+
+# Y este es el único valor que captura Fabric como `.output.result`
+mssparkutils.notebook.exit(json.dumps(result))
+
