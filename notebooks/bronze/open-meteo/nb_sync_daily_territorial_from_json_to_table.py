@@ -8,23 +8,21 @@ spark = SparkSession.builder.getOrCreate()
 # -------------------------------
 # Recibir parámetros desde entorno
 # -------------------------------
-import os, json
+import json
 
-param_value = os.environ.get("json_results", "{}")
+parsed = json.loads(result)
 
-try:
-    outer = json.loads(param_value)  # primer nivel
-    exit_val = outer.get("exitValue", "{}")
-    parsed = json.loads(exit_val)    # segundo nivel
-except Exception as e:
-    raise SystemExit(f"❌ Error parseando parámetros: {e}")
+exit_value_raw = parsed["exitValue"]
+exit_value = json.loads(exit_value_raw)
 
-start_date = parsed.get("start_date")
-end_date = parsed.get("end_date")
-years_touched = parsed.get("years_touched", [])
+start_date = exit_value["start_date"]
+end_date = exit_value["end_date"]
+years_touched = exit_value["years_touched"]
 
-print(start_date, end_date, years_touched)
-
+print("Exit value parsed:", exit_value)
+print("Start date:", start_date)
+print("End date:", end_date)
+print("Years touched:", years_touched)
 
 # -------------------------------
 # Leer solo archivos JSON por año y filtrar por fecha
