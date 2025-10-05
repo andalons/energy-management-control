@@ -253,21 +253,19 @@ print("¡JSON actualizado en", BASE_DIR, "por año/territorio (incremental + ups
 from notebookutils import mssparkutils
 import json
 
-# Asegúrate de que siempre exista bucket
+# Aseguramos que siempre exista bucket
 if 'bucket' not in globals():
     bucket = {}
 
 # Calcula años tocados de forma segura
 years_touched = list({year for (year, _) in bucket.keys()})
 
-# Tu objeto de resultado
 result = {
     "start_date": start_date.isoformat(),
     "end_date": end_date.isoformat(),
     "years_touched": years_touched
 }
 
-# Lo stringificas tú mismo
 # result = json.dumps(result)
 
 # Para verlo en logs
