@@ -1,0 +1,78 @@
+{
+  "ccaa_ids": {
+    "Península": 8741,
+    "Islas Canarias": 8742,
+    "Islas Baleares": 8743,
+    "Ceuta": 8744,
+    "Melilla": 8745,
+    "Andalucía": 4,
+    "Aragón": 5,
+    "Cantabria": 6,
+    "Castilla-La Mancha": 7,
+    "Castilla y León": 8,
+    "Cataluña": 9,
+    "País Vasco": 10,
+    "Principado de Asturias": 11,
+    "Comunidad de Madrid": 13,
+    "Comunidad de Navarra": 14,
+    "Comunidad Valenciana": 15,
+    "Extremadura": 16,
+    "Galicia": 17,
+    "La Rioja": 20,
+    "Región de Murcia": 21
+  },
+  "api_config": {
+    "balance": [
+      "balance-electrico"
+    ],
+    "demanda": [
+      "evolucion"
+    ],
+    "generacion": [
+      "estructura-generacion",
+      "estructura-generacion-emisiones-asociadas",
+      "estructura-renovables",
+      "evolucion-renovable-no-renovable"
+    ]
+  },
+  "business_keys": {
+    "balance_balance_electrico": {
+      "keys": ["geo_id", "datetime", "series_type", "metric_type"],
+      "description": "Balance eléctrico con métricas anidadas"
+    },
+    "demanda_evolucion": {
+      "keys": ["geo_id", "datetime", "series_type"],
+      "description": "Evolución de la demanda eléctrica"
+    },
+    "generacion_estructura_generacion": {
+      "keys": ["geo_id", "datetime", "series_type"],
+      "description": "Estructura de generación por tecnología"
+    },
+    "generacion_estructura_generacion_emisiones_asociadas": {
+      "keys": ["geo_id", "datetime", "series_type"],
+      "description": "Generación con emisiones de CO₂"
+    },
+    "generacion_estructura_renovables": {
+      "keys": ["geo_id", "datetime", "series_type"],
+      "description": "Desglose de renovables"
+    },
+    "generacion_evolucion_renovable_no_renovable": {
+      "keys": ["geo_id", "datetime", "series_type"],
+      "description": "Evolución renovable vs no renovable"
+    }
+  },
+  "non_business_columns": {
+    "metadata_temporal": [
+      "ingestion_timestamp",
+      "series_last_update",
+      "metric_last_update"
+    ],
+    "particiones": ["year", "month"],
+    "decorativas": [
+      "metric_icon",
+      "metric_color",
+      "series_icon",
+      "series_color"
+    ]
+  }
+}
