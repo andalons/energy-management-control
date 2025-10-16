@@ -69,9 +69,6 @@ energy-management-control/
 │ ├── CONTRIBUTING.md # Normas de contribución
 │ └── pull_request_template.md
 │
-├── scripts/ # Scripts auxiliares
-│ └── automation/ # Automatización de tareas
-│
 ├── notebooks/ # Notebooks de análisis
 │ ├── bronze/ # Ingesta de datos crudos
 │ ├── silver/ # Limpieza y normalización
@@ -80,9 +77,6 @@ energy-management-control/
 ├── data/ # Datos locales (gitignored)
 │
 ├── docs/ # Documentación técnica
-│ ├── pipeline-redata.md
-│ ├── arquitectura-medallion.md
-│ └── modelo-dimensional.md
 │
 ├── requirements.txt # Dependencias Python
 └── README.md # Este archivo
