@@ -180,8 +180,7 @@ energy-management-control/
 Ver [`/docs`](./docs) para documentación detallada:
 
 - [Pipeline REData](./docs/pipeline-redata.md)
-- [Arquitectura Medallion](./docs/arquitectura-medallion.md)
-- [Modelo Dimensional](./docs/modelo-dimensional.md)
+- [Arquitectura Medallion](./docs/architecture.md)
 
 ## 🎓 Equipo
 
